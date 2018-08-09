@@ -4,11 +4,13 @@
   "description": "card reader access API",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node app.js"
   },
   "author": "Thorsten Liese",
   "license": "ISC",
   "dependencies": {
+    "express": "^4.16.3",
+    "express-ws": "^4.0.0",
     "node-emv": "^1.0.22",
     "node-hid": "^0.7.3"
   }

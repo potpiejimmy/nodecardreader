@@ -1,177 +1,61 @@
-var HID = require('node-hid');
-var emv = require('node-emv');
+var express = require('express');
+var app = express();
+var expressWs = require('express-ws')(app);
 
-console.log(HID.devices());
+var reader = require('./hid-reader');
+var Notifier = require('./notifier');
 
-var reader = new HID.HID('\\\\?\\hid#vid_077a&pid_1016#6&3b8407b&2&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}');
+var notifier = new Notifier();
 
-//reader.on("data", data => console.log("A: " + data));
-//reader.on("error", err => console.log("E: " + err));
+app.use(function(req, res, next) {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  next();
+});
 
-createTAN("11048816650405262080595614312C303009");
+app.listen(3004, function () {
+  console.log('nodecardreader listening on port 3004');
+});
 
-function createTAN(flickercode) {
-    // See https://wiki.ccc-ffm.de/projekte:tangenerator:start
-
-    // Parse the flickercode (assume it always consists
-    // of the startcode and two other fields for Kontonummer and Betrag)
-    let parseIx = 4; // LL04
-    let len = 8;
-    let startcode = flickercode.substr(parseIx,len);
-    parseIx += len;
-    parseIx++; // assume BCD for Kontonummer
-    len = parseInt(flickercode[parseIx++]) * 2;
-    let kontonummer = flickercode.substr(parseIx,len);
-    parseIx += len;
-    parseIx++; // assume ASCII for Betrag
-    len = parseInt(flickercode[parseIx++]) * 2;
-    let betrag = Buffer.from(flickercode.substr(parseIx,len), 'hex').toString('ASCII');
-
-    console.log("startcode=" + startcode + ", kontonummer=" + kontonummer + ", betrag=" + betrag);
-
-    // Now, assemble the core data for the HASH call later
-    let hashData = [];
-
-    hashData.push(0xE1); // DIN-66003
-    hashData.push(...Buffer.from('Start-Code:', 'ASCII'));
-
-    hashData.push(0xE0); // BCD
-    hashData.push(...Buffer.from(startcode, 'hex'));
-
-    hashData.push(0xE1); // DIN-66003
-    hashData.push(...Buffer.from('Kontonummer', 'ASCII'));
-
-    hashData.push(0xE1); // DIN-66003
-    hashData.push(...Buffer.from(kontonummer, 'ASCII'));
-
-    hashData.push(0xE1); // DIN-66003
-    hashData.push(...Buffer.from('Betrag', 'ASCII'));
-
-    hashData.push(0xE1); // DIN-66003
-    hashData.push(...Buffer.from(betrag, 'ASCII'));
-
-    hashData.push(0xB6); // B0 + 6 = B6 (6 Felder)
-
-//    console.log(Buffer.from(hashData).toString('hex'));
-
-    let cardNo;
-    let ipb;
-
-    // INIT 1
-    return sendAndReceive("433040303030").then(data => 
-
-        // INIT 2
-        sendAndReceive("433130")).then(data =>
-
-        // LOCK CARD
-        sendAndReceive("434930")).then(data =>
-
-        // SELECT FILE AID TAN ANWENDUNG 'D27600002554440100'
-        // AID: D2 76 00 00 25 54 44 01 00
-        // RID: D2 76 00 00 25
-        //      D: "national registration"
-        //       2 76: ISO 3166 Country Code Deutschland
-        //            00 00 25: ZKA?
-        // PIX:                54 44 01 00: TAN Anwendung DF_TAN
-        sendAndReceive('43493900A4040C09D27600002554440100')).then(data =>
-
-        // GET PROCESSING OPTIONS
-        sendAndReceive('43493980A8000002830000')).then(data =>
-
-        // READ RECORD (read card data)
-        sendAndReceive('43493900B201BC00')).then(data => {
-            // die letzten beiden Ziffern der Kurz-BLZ plus die 10-stellige Karten-Nr. MM NN NN NN NN NN
-            cardNo = data.toString('hex').substr(6, 12);
-        }).then(() =>
-
-        // SEARCH RECORD IPB (search for '9F56' - Issuer Proprietary Bitmap)
-        sendAndReceive('43493900A2010F090400CE9F56000000FF00')).then(data => {
-            // IPB
-            ipb = data.toString('hex').substr(20, 36);
-        }).then(() =>
-
-        // SEARCH RECORD CDOL (SECCOS ab 6.0) (search for '8C' - CDOL)
-        sendAndReceive('43493900A2010F080400CE8C000000FF00')).then(data =>
-
-        // VERIFY
-        sendAndReceive('43493900200081082C' + cardNo + 'FF')).then(data =>
-
-        // HASH
-        sendAndReceive('434939002A90A0' + hexChar(hashData.length+5) + '90008081' + hexChar(hashData.length) + Buffer.from(hashData).toString('hex') + '00')).then(hash =>
-
-        // GENERATE AC (SECCOS vor 6.0)
-//        sendAndReceive('43493980AE00002B0000000000000000000000008000000000099900000000' + hash.toString('hex').substr(0,8) + '0000000000000000000020800000003400')).then(data => {
-        // GENERATE AC (SECCOS ab 6.0)
-        sendAndReceive('43493980AE00002B'+ hash.toString('hex').substr(0,40) +'000000000000000000000000000000000000000000000000')).then(data => {
-            return data.toString('hex');
-        }).then(data =>
-        
-        // Nutzdaten parsen
-        emvParse(data.substr(4)).then(emvData => {
-
-            let acData = "";
-            emvData.forEach(tag => acData += tag.value);
-            console.log("GENERATE AC DATA " + acData);
-
-            let dataBin = bufToBitString(Buffer.from(acData, 'hex'));
-            let ipbMask = bufToBitString(Buffer.from(ipb, 'hex'));
-            let usedBits = "";
-
-            console.log("DATA = " + dataBin);
-            console.log("IPB  = " + ipbMask);
-            for (var i=0; i<ipbMask.length; i++) if (ipbMask[i] == '1') usedBits += dataBin[i];
-            console.log("RES  = " + usedBits);
-            usedBits = usedBits.substr(8) + usedBits.substr(0,8);
-            console.log("SHIFT= " + usedBits);
-            let tan = (""+(1000000 + parseInt(usedBits, 2))).substr(1);
-            console.log("TAN  = " + tan);
-
-            // Release card:
-            sendAndReceive("433040303030");
-            return tan;
-        })
-    );
-}
-
-function sendAndReceive(data) {
-    return new Promise(function(resolve, reject) {
-        reader.on("error", err => {
-            reader.removeAllListeners();
-            console.log(err);
-            reject(err);
+reader.registerReader(
+    function() {
+        global.cardStatus = "IN";
+        expressWs.getWss().clients.forEach(function(client) {
+            client.send(JSON.stringify({"cardstatus":global.cardStatus, "severity":"success", "summary":"Status", "detail":"Card inserted."}));
         });
-        reader.on("data", data => {
-            reader.removeAllListeners();
-            console.log('<<<', data.toString('hex'));
-            resolve(data.slice(8, 8+data[2]));
+    },
+    function() {
+        global.cardStatus = "OUT";
+        expressWs.getWss().clients.forEach(function(client) {
+            client.send(JSON.stringify({"cardstatus":global.cardStatus, "severity":"warn", "summary":"Status", "detail":"Card removed."}));
         });
-        let sendBuf = [0x00, data.length/2, ...Buffer.from(data,"hex")];
-        let MAX_SENDBUF_LEN = 63;
-        while (sendBuf.length) {
-            let chunk = [0x04, ...sendBuf.slice(0,MAX_SENDBUF_LEN)];
-            console.log('>>>', Buffer.from(chunk).toString("hex"));
-            reader.write(chunk);
-            sendBuf = sendBuf.slice(MAX_SENDBUF_LEN);
+    }
+);
+
+/**
+ * This websocket endpoint notifies about card insertion and removal
+ */
+app.ws('/status', (ws, req) => {
+    console.log('Websocket connected.');
+    // Note: All open websockets contained in expressWs.getWss().clients.
+    ws.send(JSON.stringify({"cardstatus":global.cardStatus}));
+});
+
+/**
+ * Creates a ChipTAN
+ */
+app.get('/tan', (req, res) => {
+    console.log('CREATE TAN, flickercode=' + req.query.flickercode);
+    if (!reader.getReader()) res.send({"severity":"error", "summary":"Error", "detail":"Card reader not connected."});
+    else {
+        // if not creating TAN already, start creating TAN
+        if (!notifier.getObservers('tan')) {
+            reader.createTAN(req.query.flickercode ? req.query.flickercode : "11048816650405262080595614312C303009")
+            .then(tan => notifier.notifyObservers('tan', tan))
+            .catch(err => { console.log(err); notifier.notifyObservers('tan', err); });
         }
-    });
-}
 
-function emvParse(data) {
-    return new Promise(function(resolve, reject) {
-        emv.parse(data, emvData => resolve(emvData));
-    });
-}
-
-function hexChar(x) {
-    return ('0'+x.toString(16)).substr(-2);
-}
-
-function binChar(x) {
-    return ('0000000' + x.toString(2)).substr(-8);
-}
-
-function bufToBitString(buf) {
-    let result = '';
-    for (var i=0; i<buf.length; i++) result += binChar(buf[i]);
-    return result;
-}
+        // add observer for TAN creation
+        notifier.addObserver('tan', tan => res.send({tan:tan}));
+    }
+});
