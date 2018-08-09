@@ -41,8 +41,8 @@ function createTAN(flickercode) {
     hashData.push(0xE1); // DIN-66003
     hashData.push(...Buffer.from('Kontonummer', 'ASCII'));
 
-//    hashData.push(0xE1); // DIN-66003
-//    hashData.push(...Buffer.from(kontonummer, 'ASCII'));
+    hashData.push(0xE1); // DIN-66003
+    hashData.push(...Buffer.from(kontonummer, 'ASCII'));
 
     hashData.push(0xE1); // DIN-66003
     hashData.push(...Buffer.from('Betrag', 'ASCII'));
@@ -100,14 +100,10 @@ function createTAN(flickercode) {
         sendAndReceive('434939002A90A0' + hexChar(hashData.length+5) + '90008081' + hexChar(hashData.length) + Buffer.from(hashData).toString('hex') + '00')).then(hash =>
 
         // GENERATE AC (SECCOS vor 6.0)
-        sendAndReceive('43493980AE00002B0000000000000000000000008000000000099900000000' + hash.toString('hex').substr(0,8) + '0000000000000000000020800000003400')).then(data => {
-            
-            if (data.length < 10) {
-                // XXX Secoder Firewall blocks, use dummy data:
-                return '771E9F2701009F360201029F2608ECF50D2C1EAF4EE29F1007038201003100009000';
-            } else {
-                return data.toString('hex');
-            }
+//        sendAndReceive('43493980AE00002B0000000000000000000000008000000000099900000000' + hash.toString('hex').substr(0,8) + '0000000000000000000020800000003400')).then(data => {
+        // GENERATE AC (SECCOS ab 6.0)
+        sendAndReceive('43493980AE00002B'+ hash.toString('hex').substr(0,40) +'000000000000000000000000000000000000000000000000')).then(data => {
+            return data.toString('hex');
         }).then(data =>
         
         // Nutzdaten parsen
@@ -127,7 +123,7 @@ function createTAN(flickercode) {
             console.log("RES  = " + usedBits);
             usedBits = usedBits.substr(8) + usedBits.substr(0,8);
             console.log("SHIFT= " + usedBits);
-            let tan = parseInt(usedBits, 2);
+            let tan = (""+(1000000 + parseInt(usedBits, 2))).substr(1);
             console.log("TAN  = " + tan);
 
             // Release card:
@@ -139,7 +135,6 @@ function createTAN(flickercode) {
 
 function sendAndReceive(data) {
     return new Promise(function(resolve, reject) {
-        console.log('>>>', data);
         reader.on("error", err => {
             reader.removeAllListeners();
             console.log(err);
@@ -150,7 +145,14 @@ function sendAndReceive(data) {
             console.log('<<<', data.toString('hex'));
             resolve(data.slice(8, 8+data[2]));
         });
-        reader.write([0x04, 0x00, data.length/2, ...Buffer.from(data,"hex")]);
+        let sendBuf = [0x00, data.length/2, ...Buffer.from(data,"hex")];
+        let MAX_SENDBUF_LEN = 63;
+        while (sendBuf.length) {
+            let chunk = [0x04, ...sendBuf.slice(0,MAX_SENDBUF_LEN)];
+            console.log('>>>', Buffer.from(chunk).toString("hex"));
+            reader.write(chunk);
+            sendBuf = sendBuf.slice(MAX_SENDBUF_LEN);
+        }
     });
 }
 
