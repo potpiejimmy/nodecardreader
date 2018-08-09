@@ -1,0 +1,15 @@
+{
+  "name": "dn-nodecard",
+  "version": "1.0.0",
+  "description": "card reader access API",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Thorsten Liese",
+  "license": "ISC",
+  "dependencies": {
+    "node-emv": "^1.0.22",
+    "node-hid": "^0.7.3"
+  }
+}
