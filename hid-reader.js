@@ -70,7 +70,13 @@ function createTAN(flickercode) {
     hashData.push(...Buffer.from(startcode, 'hex'));
 
     hashData.push(0xE1); // DIN-66003
-    hashData.push(...Buffer.from('Kontonummer', 'ASCII'));
+    if (startcode[1] === '7') {
+        // Mask 7 Kontonummer
+        hashData.push(...Buffer.from('Kontonummer', 'ASCII'));
+    } else if (startcode[1] === '8') {
+        // Mask 8 IBAN
+        hashData.push(...Buffer.from('IBAN', 'ASCII'));
+    }
 
     hashData.push(0xE1); // DIN-66003
     hashData.push(...Buffer.from(kontonummer, 'ASCII'));

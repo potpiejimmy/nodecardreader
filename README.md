@@ -9,9 +9,12 @@ Connect the card reader before starting.
     npm start
 
 ## API
+
+Note: In Firefox, permanently accept the self-signed certificate to use the API in a secure cross-site scenario.
+
 ### Card status
 
-    ws://localhost:3004/status
+    wss://localhost:3004/status
     
 Reports card status changes (IN or OUT) on live websocket. Upon websocket connect, the current status is reported immediately so the caller knows whether a card is currently present or not:
 
@@ -21,7 +24,7 @@ Result:
 
 ### TAN Generation
 
-    http://localhost:3004/tan?flickercode=11048816650405262080595614312C303009
+    https://localhost:3004/tan?flickercode=11048816650405262080595614312C303009
 
 Generates TAN for the given flickercode.
 

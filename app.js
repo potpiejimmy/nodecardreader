@@ -1,11 +1,19 @@
+var fs = require('fs');
+var https = require('https');
 var express = require('express');
 var app = express();
-var expressWs = require('express-ws')(app);
 
 var reader = require('./hid-reader');
 var Notifier = require('./notifier');
 
 var notifier = new Notifier();
+
+var server = https.createServer({
+    key: fs.readFileSync('./ssl/ssl.pem'),
+    cert: fs.readFileSync('./ssl/ssl.crt')
+}, app);
+
+var expressWs = require('express-ws')(app, server);
 
 app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Origin", "*");
@@ -13,7 +21,7 @@ app.use(function(req, res, next) {
   next();
 });
 
-app.listen(3004, function () {
+server.listen(3004, function () {
   console.log('nodecardreader listening on port 3004');
 });
 
