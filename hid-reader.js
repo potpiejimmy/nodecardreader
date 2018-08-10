@@ -5,6 +5,7 @@ console.log(HID.devices());
 
 var reader;
 var lastCardStatus = -1;
+var pausePolling;
 
 function registerReader(onCardInserted, onCardRemoved) {
     reader = new HID.HID('\\\\?\\hid#vid_077a&pid_1016#6&3b8407b&2&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}');
@@ -15,15 +16,22 @@ function registerReader(onCardInserted, onCardRemoved) {
 }
 
 function pollCardState(onCardInserted, onCardRemoved) {
+    if (pausePolling) {
+        setTimeout(()=>pollCardState(onCardInserted, onCardRemoved), 1000);
+        return;
+    }
+
     // C'31' Inquire status: 30H Presence and position of card
-    sendAndReceive("433130").then(data => {
-        let cardStatus = data[0];
+    sendAndReceive("433130", true).then(data => {
+        let internalCardStatus = data.slice(3,5).toString();
+        // "00" = No card
+        // "10" = Card present in slot, not fully inserted
+        // "30" = Card fully inserted
+        let cardStatus = internalCardStatus === "30" ? 1/*IN*/ : 0/*OUT*/;
         if (cardStatus != lastCardStatus) {
             lastCardStatus = cardStatus;
-            console.log("CARD STATUS IS " + data[0]);
-
-            // XXX TODO
-            //onCardRemoved();
+            if (cardStatus) onCardInserted();
+            else onCardRemoved();
         }
         setTimeout(()=>pollCardState(onCardInserted, onCardRemoved), 1000);
     });
@@ -80,6 +88,8 @@ function createTAN(flickercode) {
     let cardNo;
     let ipb;
 
+    pausePolling = true; // do not poll during communication
+
     // LOCK CARD
     return sendAndReceive("434930").then(data =>
 
@@ -98,13 +108,13 @@ function createTAN(flickercode) {
         // READ RECORD (read card data)
         sendAndReceive('43493900B201BC00')).then(data => {
             // die letzten beiden Ziffern der Kurz-BLZ plus die 10-stellige Karten-Nr. MM NN NN NN NN NN
-            cardNo = data.toString('hex').substr(6, 12);
+            cardNo = data.toString('hex').substr(16, 12);
         }).then(() =>
 
         // SEARCH RECORD IPB (search for '9F56' - Issuer Proprietary Bitmap)
         sendAndReceive('43493900A2010F090400CE9F56000000FF00')).then(data => {
             // IPB
-            ipb = data.toString('hex').substr(20, 36);
+            ipb = data.toString('hex').substr(30, 36);
         }).then(() =>
 
         // SEARCH RECORD CDOL (SECCOS ab 6.0) (search for '8C' - CDOL)
@@ -117,10 +127,10 @@ function createTAN(flickercode) {
         sendAndReceive('434939002A90A0' + hexChar(hashData.length+5) + '90008081' + hexChar(hashData.length) + Buffer.from(hashData).toString('hex') + '00')).then(hash =>
 
         // GENERATE AC (SECCOS vor 6.0)
-//        sendAndReceive('43493980AE00002B0000000000000000000000008000000000099900000000' + hash.toString('hex').substr(0,8) + '0000000000000000000020800000003400')).then(data => {
+//        sendAndReceive('43493980AE00002B0000000000000000000000008000000000099900000000' + hash.toString('hex').substr(10,8) + '0000000000000000000020800000003400')).then(data => {
         // GENERATE AC (SECCOS ab 6.0)
-        sendAndReceive('43493980AE00002B'+ hash.toString('hex').substr(0,40) +'000000000000000000000000000000000000000000000000')).then(data => {
-            return data.toString('hex');
+        sendAndReceive('43493980AE00002B'+ hash.toString('hex').substr(10,40) +'000000000000000000000000000000000000000000000000')).then(data => {
+            return data.toString('hex').substr(10);
             // dummy test data:
             //return '771E9F2701009F360201029F2608ECF50D2C1EAF4EE29F1007038201003100009000';
         }).then(data =>
@@ -146,13 +156,15 @@ function createTAN(flickercode) {
             console.log("TAN  = " + tan);
 
             // Release card:
-            sendAndReceive("433040303030");
-            return tan;
+            return sendAndReceive("433040303030").then(() => {
+                pausePolling = false; // continue card state polling
+                return tan;
+            });
         })
     );
 }
 
-function sendAndReceive(data) {
+function sendAndReceive(data, nolog) {
     return new Promise(function(resolve, reject) {
         reader.on("error", err => {
             reader.removeAllListeners();
@@ -161,14 +173,14 @@ function sendAndReceive(data) {
         });
         reader.on("data", data => {
             reader.removeAllListeners();
-            console.log('<<<', data.toString('hex'));
-            resolve(data.slice(8, 3+data[2]));
+            if (!nolog) console.log('<<<', data.toString('hex'));
+            resolve(data.slice(3, 3+data[2]));
         });
         let sendBuf = [0x00, data.length/2, ...Buffer.from(data,"hex")];
         let MAX_SENDBUF_LEN = 63;
         while (sendBuf.length) {
             let chunk = [0x04, ...sendBuf.slice(0,MAX_SENDBUF_LEN)];
-            console.log('>>>', Buffer.from(chunk).toString("hex"));
+            if (!nolog) console.log('>>>', Buffer.from(chunk).toString("hex"));
             reader.write(chunk);
             sendBuf = sendBuf.slice(MAX_SENDBUF_LEN);
         }

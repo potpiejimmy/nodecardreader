@@ -1,36 +1,24 @@
-0000010100
+Das 0x04 am Anfang ist die fixe Report-ID der HID-Kommunikation,
+danach kommen zwei Bytes fuer Laenge und danach die eigentlichen
+Nutzdaten laut Sankyo-Protokoll, beginnend meist mit dem 0x43 = "C", siehe PDF
 
-00A4040C09D27600002554440100
+Die Kommunikation findet immer mit 64 Bytes statt (HID Report Laenge), aufgefuellt mit Nullen.
+Abzueglich des 0x04 am Anfang verbleiben also maximal 63 Bytes fuer einen Datenhappen.
 
-1 // Init (Releases Card)
+Wesentliche Kommandos:
+
+// Einmalig nach Power-ON:
+// C'30' Initialize ICRW
 040006433040303030
 
-// Init
-040003433644
-
-// Init
-040003433638
-
-2 // Init
+// Abfrage des Kartenstatus:
+// C'31' Inquire status: 30H Presence and position of card
 040003433130
 
-// Init
-04000443333234
 
-3 // IC Activate (Locks card)
+// IC Activate (Locks card in slot)
 040003434930
 
+// Danach, fuer APDU-Kommunikation:
+// ICC Automatic Communication
 0400LL434939 + APDU
-
-4 // ICC Automatic Communication 
-04001143493900A4040C09D27600002554440100
-
-5 //
-04000B43493980A8000002830000
-
-
-
-040003434937
-
-ACTIVATE SAM:
-040003434940
