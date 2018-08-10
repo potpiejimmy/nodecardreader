@@ -22,3 +22,11 @@ Wesentliche Kommandos:
 // Danach, fuer APDU-Kommunikation:
 // ICC Automatic Communication
 0400LL434939 + APDU
+
+
+// LED aus
+040003433330
+// LED rot
+040003433331
+// LED grün
+040003433332

@@ -10,8 +10,8 @@ var pausePolling;
 function registerReader(onCardInserted, onCardRemoved) {
     reader = new HID.HID('\\\\?\\hid#vid_077a&pid_1016#6&3b8407b&2&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}');
 
-    // C'30' Initialize ICRW
-    sendAndReceive("433040303030").then(() => 
+    // Initialize ICRW and LED green:
+    releaseCard().then(() => 
     pollCardState(onCardInserted, onCardRemoved));
 }
 
@@ -91,7 +91,7 @@ function createTAN(flickercode) {
     pausePolling = true; // do not poll during communication
 
     // LOCK CARD
-    return sendAndReceive("434930").then(data =>
+    return lockCard().then(data =>
 
         // SELECT FILE AID TAN ANWENDUNG 'D27600002554440100'
         // AID: D2 76 00 00 25 54 44 01 00
@@ -156,7 +156,7 @@ function createTAN(flickercode) {
             console.log("TAN  = " + tan);
 
             // Release card:
-            return sendAndReceive("433040303030").then(() => {
+            return releaseCard().then(() => {
                 pausePolling = false; // continue card state polling
                 return tan;
             });
@@ -185,6 +185,20 @@ function sendAndReceive(data, nolog) {
             sendBuf = sendBuf.slice(MAX_SENDBUF_LEN);
         }
     });
+}
+
+function lockCard() {
+    // LOCK CARD
+    return sendAndReceive("434930").then(() =>
+    // LED RED
+    sendAndReceive("433331"));
+}
+
+function releaseCard() {
+    // RELEASE CARD
+    return sendAndReceive("433040303030").then(() =>
+    // LED GREEN
+    sendAndReceive("433332"));
 }
 
 function emvParse(data) {
