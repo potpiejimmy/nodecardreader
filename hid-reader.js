@@ -189,7 +189,7 @@ function readMaestro() {
             }
         })
         .then(tag57 => {
-            releaseCard().then(() => {
+            return releaseCard().then(() => {
                 pausePolling = false; // continue card state polling
                 return tag57;
             });
