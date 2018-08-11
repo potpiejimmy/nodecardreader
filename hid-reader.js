@@ -170,6 +170,51 @@ function createTAN(flickercode) {
     );
 }
 
+function readMaestro() {
+    pausePolling = true; // do not poll during communication
+
+    return lockCard().then(() =>
+        // SELECT AID MAESTRO: '00A4040007A000000004306000'
+        sendAndReceiveAPDU('00A4040007A000000004306000')
+        .then(data => {
+                // EC
+            return readRecord(1, 3, 4);
+        })
+        .then(tag57 => {
+            if (tag57) {
+                return tag57;
+            } else {
+                // try another one:
+                return readRecord(2, 1, 6);
+            }
+        })
+        .then(tag57 => {
+            releaseCard().then(() => {
+                pausePolling = false; // continue card state polling
+                return tag57;
+            });
+        })
+    );
+}
+
+function readRecord(sfi, rec, offset) {
+    return sendAndReceiveAPDU('00B2'+hexChar(rec)+hexChar((sfi << 3) | 4)+'00')
+    .then(data => emvParse(data.toString('hex').substr(offset)))
+    .then(emvData => {
+        if (emvData != null) {
+            console.log(emvData);
+            return findEmvTag(emvData, '57');
+        }
+    });
+}
+
+function findEmvTag(emvData, tagName) {
+    var found;
+    emvData.forEach(tag => {
+        if (tag.tag == tagName) found=tag;
+    });
+    return found;
+}
 
 function sendAndReceiveAPDU(data) {
     return sendAndReceive('434939' + data, true).then(res => res.slice(5));
@@ -238,3 +283,4 @@ function bufToBitString(buf) {
 module.exports.getReader = getReader;
 module.exports.registerReader = registerReader;
 module.exports.createTAN = createTAN;
+module.exports.readMaestro = readMaestro;
