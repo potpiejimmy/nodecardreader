@@ -8,12 +8,16 @@ This project aims to help build the bridge from physical, card-based banking to 
 
 The following card readers are supported:
 
-* SANKYO ICM330-2
-* TODO [Any PC/SC compliant card reader]
+* SANKYO ICM330-2 via Windows HID
+* Any PC/SC compliant card reader
+
+Note: Please comment-in the appropriate line in reader.js to select SANKYO HID or PC/SC.
 
 Installation:
 
     npm install
+
+Note: You may remove the pcsclite dependency in package.json if you encounter problems during installation unless you are using a PC/SC device.
 
 Connect the card reader before starting. Start with:
 

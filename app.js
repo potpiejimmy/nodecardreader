@@ -3,7 +3,7 @@ var https = require('https');
 var express = require('express');
 var app = express();
 
-var reader = require('./hid-reader');
+var reader = require('./reader');
 var Notifier = require('./notifier');
 
 var notifier = new Notifier();
