@@ -146,12 +146,13 @@ function readMaestro() {
                 // EC
             return readRecord(1, 3, 4);
         })
-        .then(tag57 => {
+        .then(async tag57 => {
             if (tag57) {
                 return tag57;
             } else {
                 // try another one:
-                return readRecord(2, 1, 6);
+                await readRecord(2,1,4);
+                return readRecord(2,2,4);
             }
         })
         .then(tag57 => {
@@ -203,9 +204,44 @@ function bufToBitString(buf) {
     return result;
 }
 
+// -------------- THE FOLLOWING IS FOR TESTING ONLY ------------
+
+function dumpNext(sfi, rec, maxSfi, maxRec) {
+    if (rec == 1) console.log("SFI " + sfi);
+    reader.sendAndReceiveAPDU('00B2'+hexChar(rec)+hexChar((sfi << 3) | 4)+'00').then(data => {
+        if (sfi == maxSfi && rec == maxRec) {
+            reader.unlockReader();
+        } else {
+            if (rec == maxRec) {rec = 1; sfi++;} else rec++;
+            dumpNext(sfi, rec, maxSfi, maxRec);
+        }
+    });
+}
+
+function dumpPSE() {
+    // SELECT 1PAY.SYS.DDF01 or 2PAY.SYS.DDF01 (contactless)
+    dumpAll(new Buffer("1PAY.SYS.DDF01", 'ASCII').toString('hex'));
+}
+
+function dumpMaestro() {
+    dumpAll("A0000000043060");
+}
+
+function dumpAll(dfname) {
+    reader.lockReader().then(() => {
+        // SELECT DFNAME
+        reader.sendAndReceiveAPDU('00A40400' + hexChar(dfname.length/2) + dfname +'00').then(data => {
+            // READ ALL
+            dumpNext(1, 1, 3, 16);
+        });
+    });
+}
+
 // ----------------------------------------
 
 module.exports.getReader = getReader;
 module.exports.registerReader = registerReader;
 module.exports.createTAN = createTAN;
 module.exports.readMaestro = readMaestro;
+module.exports.dumpMaestro = dumpMaestro;
+module.exports.dumpPSE = dumpPSE;

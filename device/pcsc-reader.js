@@ -66,43 +66,6 @@ function sendAndReceiveAPDU(data) {
     });
 }
 
-// -------------- THE FOLLOWING IS FOR TESTING ONLY ------------
-
-function dumpNext(protocol, sfi, rec, maxSfi, maxRec) {
-    if (rec == 1) console.log("SFI " + sfi);
-    sendAndReceive(protocol, '00B2'+hexChar(rec)+hexChar((sfi << 3) | 4)+'00').then(data => {
-        if (sfi == maxSfi && rec == maxRec) {
-            reader.disconnect(reader.SCARD_LEAVE_CARD, function(err) {});
-        } else {
-            if (rec == maxRec) {rec = 1; sfi++;} else rec++;
-            dumpNext(protocol, sfi, rec, maxSfi, maxRec);
-        }
-    });
-}
-
-function dumpPSE() {
-    // SELECT 1PAY.SYS.DDF01 or 2PAY.SYS.DDF01 (contactless)
-    dumpAll(new Buffer("1PAY.SYS.DDF01", 'ASCII').toString('hex'));
-}
-
-function dumpMaestro() {
-    dumpAll("A0000000043060");
-}
-
-function dumpAll(dfname) {
-    reader.connect({ share_mode : reader.SCARD_SHARE_SHARED }, function(err, protocol) {
-        if (err) console.log(err); 
-        else {
-            console.log('Protocol(', reader.name, '):', protocol);
-            // SELECT DFNAME
-            sendAndReceive(protocol, '00A40400' + hexChar(dfname.length/2) + dfname +'00').then(data => {
-                // READ ALL
-                dumpNext(protocol, 1, 1, 3, 16);
-            });
-        }
-    });
-}
-
 // ----------------------------------------
 
 module.exports.registerReader = registerReader;

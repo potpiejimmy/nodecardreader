@@ -2,6 +2,11 @@ var fs = require('fs');
 var https = require('https');
 var express = require('express');
 var app = express();
+var cfg = require('./config');
+const fetch = require('node-fetch');
+const open = require('open');
+
+let doCardAuth = false;
 
 var reader = require('./reader');
 var Notifier = require('./notifier');
@@ -25,12 +30,18 @@ server.listen(3004, function () {
   console.log('nodecardreader listening on port 3004');
 });
 
+if (process.argv[2] == '--cardauth') {
+    doCardAuth = true;
+    console.log("Authenticate cards against " + cfg.CARD_AUTH_SERVICE_URL);
+}
+
 reader.registerReader(
     function() {
         global.cardStatus = "IN";
         expressWs.getWss().clients.forEach(function(client) {
             client.send(JSON.stringify({"cardstatus":global.cardStatus, "severity":"success", "summary":"Status", "detail":"Card inserted."}));
         });
+        if (doCardAuth) authenticateCard();
     },
     function() {
         global.cardStatus = "OUT";
@@ -99,3 +110,26 @@ app.get('/card', (req, res) => {
         });
     }
 });
+
+// card authentication
+
+async function authenticateCard() {
+    let tag57 = await reader.readMaestro();
+    console.log("READ CARD: " + (tag57 && tag57.value));
+
+    if (tag57) {
+        console.log("Authenticating card against: " + cfg.CARD_AUTH_SERVICE_URL);
+        let result = await fetch(cfg.CARD_AUTH_SERVICE_URL, {
+            method: 'POST',
+            body: JSON.stringify({ t2: tag57.value }),
+            headers: {
+                'Content-Type': 'application/json',
+                "DN-API-KEY": cfg.CARD_AUTH_API_KEY,
+                "DN-API-SECRET": cfg.CARD_AUTH_API_SECRET
+            }
+        });
+        let data = await result.json();
+        console.log("RESULT: " + JSON.stringify(data));
+        if (data.url) open(data.url + "&nonce=" + data.nonce);
+    }
+}
