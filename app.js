@@ -130,6 +130,10 @@ async function authenticateCard() {
         });
         let data = await result.json();
         console.log("RESULT: " + JSON.stringify(data));
-        if (data.url) open(data.url + "&nonce=" + data.nonce);
+        if (data.url) {
+            let url = data.url + "&nonce=" + data.nonce;
+            console.log("Opening " + url);
+            open(url);
+        }
     }
 }
