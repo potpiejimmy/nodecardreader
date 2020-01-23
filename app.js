@@ -111,6 +111,10 @@ app.get('/card', (req, res) => {
     }
 });
 
+app.get('/emv', (req, res) => {
+    reader.emvGirocard().then( data => res.send(data) );
+});
+
 // card authentication
 
 async function authenticateCard() {

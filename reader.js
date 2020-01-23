@@ -237,6 +237,39 @@ function dumpAll(dfname) {
     });
 }
 
+async function emvGirocard() {
+    await reader.lockReader();
+
+    // ATR
+    await sendAndReceiveAPDU('3BFF1800FF8131FE4565630D06610764000D90228000061134');
+
+    // SELECT AID D27600002547410100 = ZKA	Germany	Girocard ATM
+    await sendAndReceiveAPDU('00A4040009D2760000254741010000');
+
+    // ?
+    await sendAndReceiveAPDU('0022F302');
+
+    // READ RECORD REC 01, SFI 24
+    await sendAndReceiveAPDU('00B201C400');
+
+    // ?
+    await sendAndReceiveAPDU('0022F301');
+
+    // GET PROCESSING OPTIONS
+    await sendAndReceiveAPDU('80A800000D830B6040200280148000B0100000');
+
+    for (let i=1; i<9; i++) {
+        // READ RECORD REC i, SFI 1
+        let rec = await sendAndReceiveAPDU('00B20'+i+'0C00');
+        console.log(rec);
+    }
+
+    // GENERATE AC
+    let res = await sendAndReceiveAPDU('80AE8000250000000000000000000000008000048000097800000001000000000000000000000000000000');
+    console.log(res.toString('hex'));
+
+}
+
 // ----------------------------------------
 
 module.exports.getReader = getReader;
@@ -245,3 +278,4 @@ module.exports.createTAN = createTAN;
 module.exports.readMaestro = readMaestro;
 module.exports.dumpMaestro = dumpMaestro;
 module.exports.dumpPSE = dumpPSE;
+module.exports.emvGirocard = emvGirocard;
