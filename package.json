@@ -11,6 +11,8 @@
   "dependencies": {
     "express": "^4.16.3",
     "express-ws": "^4.0.0",
+    "jspos": "0.0.11-RELEASE",
+    "moment": "^2.24.0",
     "node-emv": "^1.0.22",
     "node-fetch": "^2.6.0",
     "node-hid": "^0.7.3",

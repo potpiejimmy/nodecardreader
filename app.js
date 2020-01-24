@@ -112,7 +112,7 @@ app.get('/card', (req, res) => {
 });
 
 app.get('/emv', (req, res) => {
-    reader.emvGirocard().then( data => res.send(data) );
+    reader.emvGirocard().then( data => res.send('<a href="https://iso.doogetha.com/?msg='+data+'">ISO message</a>') );
 });
 
 // card authentication

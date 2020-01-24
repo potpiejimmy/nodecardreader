@@ -46,16 +46,20 @@ function sendAndReceiveAPDU(data) {
 
 function sendAndReceive(data, dolog) {
     return new Promise(function(resolve, reject) {
+        let receiveBuf = [];
         reader.on("error", err => {
             reader.removeAllListeners();
             console.log(err);
             reject(err);
         });
         reader.on("data", data => {
-            reader.removeAllListeners();
             if (dolog) console.log('<<<', data.toString('hex'));
-            // TODO receiving multiple blocks not handled here, assume data always in one block
-            resolve(data.slice(3, 3+data[2]));
+            receiveBuf = receiveBuf.concat([...data]);
+
+            if (receiveBuf.length >= receiveBuf[2] + 3) { // received all
+                reader.removeAllListeners();
+                resolve(Buffer.from(receiveBuf.slice(3, 3+receiveBuf[2])));
+            }
         });
         let sendBuf = [0x00, data.length/2, ...Buffer.from(data,"hex")];
         let MAX_SENDBUF_LEN = 63;

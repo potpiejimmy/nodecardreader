@@ -1,4 +1,8 @@
 var emv = require('node-emv');
+var crypto = require('crypto');
+var jspos = require('jspos');
+var moment = require('moment');
+var util = require('./util/util');
 
 // SANKYO / HID READER"
 var reader = require('./device/hid-reader');
@@ -220,7 +224,7 @@ function dumpNext(sfi, rec, maxSfi, maxRec) {
 
 function dumpPSE() {
     // SELECT 1PAY.SYS.DDF01 or 2PAY.SYS.DDF01 (contactless)
-    dumpAll(new Buffer("1PAY.SYS.DDF01", 'ASCII').toString('hex'));
+    dumpAll(Buffer.from("1PAY.SYS.DDF01", 'ASCII').toString('hex'));
 }
 
 function dumpMaestro() {
@@ -237,14 +241,25 @@ function dumpAll(dfname) {
     });
 }
 
+let transactionSequenceNo = 0;
+
 async function emvGirocard() {
+
     await reader.lockReader();
+
+    let emvTags = [];
+
+    const AID = "D27600002547410100"; // AID D27600002547410100 = ZKA Germany Girocard ATM
 
     // ATR
     await sendAndReceiveAPDU('3BFF1800FF8131FE4565630D06610764000D90228000061134');
 
+    // SELECT ADF "1PAY.SYS.DDF01"
+    let res = await sendAndReceiveAPDU('00A404000E315041592E5359532E444446303100');
+    console.log("SELECT ADF RESULT: " + res.toString('hex'));
+
     // SELECT AID D27600002547410100 = ZKA	Germany	Girocard ATM
-    await sendAndReceiveAPDU('00A4040009D2760000254741010000');
+    await sendAndReceiveAPDU('00A4040009' + AID + '00');
 
     // ?
     await sendAndReceiveAPDU('0022F302');
@@ -255,19 +270,156 @@ async function emvGirocard() {
     // ?
     await sendAndReceiveAPDU('0022F301');
 
-    // GET PROCESSING OPTIONS
-    await sendAndReceiveAPDU('80A800000D830B6040200280148000B0100000');
+    // GET PROCESSING OPTIONS / INITIATE APPLICATION PROCESS
+    res = await sendAndReceiveAPDU('80A800000D830B6040200280148000B0100000');
+
+    // returns AIP (tag 82) and AFL (tag 94)
+    console.log("GET PROCESSING OPTIONS RESULT: " + res.toString('hex'));
+    if (res.length > 2) emvTags = emvTags.concat(await emvParse(res.slice(2).toString('hex')));
 
     for (let i=1; i<9; i++) {
         // READ RECORD REC i, SFI 1
         let rec = await sendAndReceiveAPDU('00B20'+i+'0C00');
-        console.log(rec);
+        console.log("READ REC "+i+" RESULT: " + rec.toString('hex'));
+        if (res.length > 2) emvTags = emvTags.concat(await emvParse(rec.slice(2).toString('hex')));
     }
 
     // GENERATE AC
-    let res = await sendAndReceiveAPDU('80AE8000250000000000000000000000008000048000097800000001000000000000000000000000000000');
-    console.log(res.toString('hex'));
+    res = await sendAndReceiveAPDU('80AE8000250000000000000000000000008000048000097800000001000000000000000000000000000000');
+    console.log("GENERATE AC RESULT: " + res.toString('hex'));
+    emvTags = emvTags.concat(await emvParse(res.slice(2).toString('hex')));
 
+    console.log("COLLECTED TAGS FROM CARD:");
+    console.log(emvTags);
+    console.log("-----------");
+
+    // create tag lookup map:
+    let emvTagsMap = {};
+    for (let tag of emvTags) emvTagsMap[tag.tag] = {
+        value: tag.value,
+        data: tag.tag + tag.length + tag.value
+    }
+
+    // add terminal/transaction specific tags for BMP55 cashout
+    transactionSequenceNo++;
+    let date = moment(new Date());
+
+    emvTagsMap['9F37'] = { data: '9F3704' + crypto.randomBytes(4).toString('hex') }; // Unpredictable Number
+    emvTagsMap['95']   = { data: '95058000048000' }; // Terminal Verification Results
+    emvTagsMap['9A']   = { data: '9A03' + date.format('YYMMDD') }; // Transaction Date YYMMDD
+    emvTagsMap['9C']   = { data: '9C0101' }; // Transaction Type 01
+    emvTagsMap['5F2A'] = { data: '5F2A020978' }; // Transaction Currency Code 0978
+    emvTagsMap['9F1A'] = { data: '9F1A020280' }; // Terminal Country Code 0280
+    emvTagsMap['9F34'] = { data: '9F3403020300' }; // Cardholder Verification Method (CVM) Results 020300 (online)
+    emvTagsMap['9F33'] = { data: '9F3303604020' }; // Terminal Capabilities 604020
+    emvTagsMap['9F35'] = { data: '9F350114' }; // Terminal Type 14
+    emvTagsMap['9F1E'] = { data: '9F1E08F1F2F3F4F5F6F7F8' }; // Interface Device (IFD) Serial Number '12345678'
+    emvTagsMap['84']   = { data: '8409' + AID }; // Dedicated File (DF) Name D27600002547410100
+    emvTagsMap['9F09'] = { data: '9F09020002' }; // Application Version Number, Terminal 0002
+    emvTagsMap['9F41'] = { data: '9F4104' + (""+(100000000+transactionSequenceNo)).substr(1) }; // Transaction Sequence Counter
+    emvTagsMap['9F02'] = { data: '9F0206000000001000' }; // Amount, Authorised (Numeric)
+
+    console.log(emvTagsMap);
+
+    res = await buildISO200(date, emvTagsMap);
+
+    await reader.unlockReader();
+
+    return res;
+}
+
+async function buildISO200(date, emvTags) {
+    let { IFB_NUMERIC, IFB_BITMAP, IFB_LLNUM, IFB_LLLNUM, IF_CHAR, IFB_LLCHAR, IFB_LLLCHAR, IFB_BINARY, IFB_LLBINARY, IFB_LLLBINARY, IFB_AMOUNT } = jspos.packer;
+    
+    let OPT_ISO_MSG_FORMAT = [
+        /*MTI*/            new IFB_NUMERIC(4, "Message Type Indicator", true),
+        /*PRIMARY BITMAP*/ new IFB_BITMAP(8, "Bitmap"),
+    ];
+    
+    /* define ISO bitmaps */
+    OPT_ISO_MSG_FORMAT[2]  = new IFB_BINARY(12, "Track2PAN");
+    OPT_ISO_MSG_FORMAT[3]  = new IFB_BINARY(3, "Abwicklungskennzeichen");
+    OPT_ISO_MSG_FORMAT[4]  = new IFB_BINARY(6, "Amount");
+    OPT_ISO_MSG_FORMAT[11] = new IFB_BINARY(3, "Tracenummer");
+    OPT_ISO_MSG_FORMAT[12] = new IFB_BINARY(3, "Uhrzeit");
+    OPT_ISO_MSG_FORMAT[13] = new IFB_BINARY(2, "Datum");
+    OPT_ISO_MSG_FORMAT[14] = new IFB_BINARY(2, "Expiry Date");
+    OPT_ISO_MSG_FORMAT[18] = new IFB_BINARY(2, "Merchant Type");
+    OPT_ISO_MSG_FORMAT[22] = new IFB_BINARY(2, "Entry Mode");
+    OPT_ISO_MSG_FORMAT[23] = new IFB_BINARY(2, "Card Sequence No");
+    OPT_ISO_MSG_FORMAT[25] = new IFB_BINARY(1, "Condition Code");
+    OPT_ISO_MSG_FORMAT[26] = new IFB_BINARY(1, "Max PIN");
+    OPT_ISO_MSG_FORMAT[33] = new IFB_BINARY(5, "ID zwischengeschalteter Rechner / PS-ID");
+    OPT_ISO_MSG_FORMAT[35] = new IFB_BINARY(21, "Track 2");
+    OPT_ISO_MSG_FORMAT[39] = new IFB_BINARY(1, "Antwortcode");
+    OPT_ISO_MSG_FORMAT[41] = new IFB_BINARY(8, "Terminal-ID");
+    OPT_ISO_MSG_FORMAT[42] = new IFB_BINARY(15, "Betreiber-BLZ");
+    OPT_ISO_MSG_FORMAT[52] = new IFB_BINARY(8, "PAC");
+    OPT_ISO_MSG_FORMAT[53] = new IFB_BINARY(8, "Sicherheitsverfahren");
+    OPT_ISO_MSG_FORMAT[55] = new IFB_BINARY(0, "Chip Data");
+    OPT_ISO_MSG_FORMAT[57] = new IFB_BINARY(37, "Verschlüsselungsparameter");
+    OPT_ISO_MSG_FORMAT[61] = new IFB_BINARY(10, "Online-Zeitpunkt");
+    OPT_ISO_MSG_FORMAT[64] = new IFB_BINARY(8, "MAC");
+
+    let isoPacker = new jspos.ISOBasePackager();
+    isoPacker.setFieldPackager(OPT_ISO_MSG_FORMAT);
+
+    let isoMsg = isoPacker.createISOMsg();
+    isoMsg.setMTI("0200"); /* MSGTYPE 0200 */
+    isoMsg.setField(2, "F1F0" + emvTags['5A'].value); // TRACK2PAN
+    isoMsg.setField(3, "010113"); /* AKZ */
+    isoMsg.setField(4, "000000001000"); /* AMOUNT */
+    isoMsg.setField(11, (""+(1000000+transactionSequenceNo)).substr(1)); /* TRANSACT NO */
+    isoMsg.setField(12, date.format('HHmmss')); // DATE
+    isoMsg.setField(13, date.format('MMDD')); // TIME
+    isoMsg.setField(14, emvTags['57'].value.substr(20,4)); // EXPIRY DATE
+    isoMsg.setField(18, "6011"); // MERCHANT TYPE
+    isoMsg.setField(22, "0501"); // ENTRY MODE
+    isoMsg.setField(23, "0001"); // CARD SEQUENCE NO
+    isoMsg.setField(25, "62"); // CONDITION CODE
+    isoMsg.setField(26, "12"); // MAXPIN
+    isoMsg.setField(33, "F0F3221000"); // COMP ID
+    isoMsg.setField(35, "F1F9" + emvTags['57'].value); // TRACK2
+    isoMsg.setField(41, "F0F0F0F8F8F8F9F1"); // TERMINAL ID: '00088891'
+    isoMsg.setField(42, "F0F0F0F0F0F0F0F4F8F0F5F0F1F6F1"); // BLZ: '000000048050161'
+    isoMsg.setField(52, "6B3941947F1699DD"); // PAC // XXX
+    isoMsg.setField(53, "0102110002000000"); // SECURITY DATA
+
+    let bmp55 = emvTags['9F26'].data + 
+                emvTags['9F27'].data +
+                emvTags['9F36'].data +
+                emvTags['9F37'].data +
+                emvTags['9F10'].data +
+                emvTags['95'].data +
+                emvTags['9A'].data +
+                emvTags['9C'].data +
+                emvTags['5F2A'].data +
+                emvTags['82'].data +
+                emvTags['9F1A'].data +
+                emvTags['9F33'].data +
+                emvTags['9F34'].data +
+                emvTags['9F35'].data +
+                emvTags['9F1E'].data +
+                emvTags['84'].data +
+                emvTags['9F09'].data +
+                emvTags['9F41'].data +
+                emvTags['9F02'].data;
+
+    let bmp55Len = bmp55.length / 2;
+
+    isoMsg.setField(55, util.asciiToEbcdic(util.padNumber(bmp55Len, 3)).toString('hex') + bmp55); // SECURITY DATA
+    isoPacker.getFieldPackager(55).setLength(3 + bmp55Len); // CHIPDATA
+
+    isoMsg.setField(57, "F0F3F40104E92F963D320A2416803B5D6AAF38D0B4075D55DF820D5AD7598E946C278508DF"); // SESSIONKEY
+    isoMsg.setField(61, "F0F0F720210101000000"); // ONLINE TIME
+    isoMsg.setField(64, "0000000000000000"); /* set empty BMP64 before calculating MAC */
+
+    let msg = isoMsg.pack();
+
+    let res = Buffer.from(msg).toString('hex');
+    console.log(res);
+
+    return res;
 }
 
 // ----------------------------------------
